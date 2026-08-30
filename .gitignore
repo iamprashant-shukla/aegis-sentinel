@@ -1,0 +1,22 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Large Raw Datasets (>50MB)
+data/raw/*.parquet
+data/raw/cic-collection.parquet
+*.zip
+*.tar.gz
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+
+# Temporary / OS / IDE files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
