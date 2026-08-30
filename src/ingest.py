@@ -233,8 +233,15 @@ class FlowAccumulator:
             tcp_win_max = 0
 
         # Ratios and threat indicators
-        header_overhead = max(0, self.total_wire_bytes - self.total_payload_bytes)
-        payload_ratio = (self.total_payload_bytes / self.total_wire_bytes) if self.total_wire_bytes > 0 else 0.0
+        # Map protocol to numeric for model
+        if self.key.protocol == "TCP":
+            proto_num = 6
+        elif self.key.protocol == "UDP":
+            proto_num = 17
+        elif self.key.protocol == "ICMP" or self.key.protocol == "IPv6-ICMP":
+            proto_num = 1
+        else:
+            proto_num = 0
 
         return {
             "flow_id": self.key.to_string(),
@@ -242,45 +249,23 @@ class FlowAccumulator:
             "dst_ip": self.key.dst_ip,
             "src_port": self.key.src_port,
             "dst_port": self.key.dst_port,
-            "protocol": self.key.protocol,
             "start_time": f"{self.start_time:.6f}",
             "end_time": f"{self.end_time:.6f}",
-            "flow_duration_sec": round(duration, 6),
-            "packet_count": self.packet_count,
+            "protocol_name": self.key.protocol,
+            "duration": round(duration, 6),
+            "total_packets": self.packet_count,
             "total_bytes": self.total_wire_bytes,
-            "total_payload_bytes": self.total_payload_bytes,
-            "bytes_per_sec": round(bytes_per_sec, 4),
-            "pkts_per_sec": round(pkts_per_sec, 4),
-            "payload_bytes_per_sec": round(payload_bytes_per_sec, 4),
+            "packet_rate": round(pkts_per_sec, 4),
+            "byte_rate": round(bytes_per_sec, 4),
+            "pkt_len_mean": round(pkt_len_mean, 4),
+            "pkt_len_max": pkt_len_max,
+            "pkt_len_std": round(pkt_len_std, 4),
             "iat_mean": round(iat_mean, 6),
             "iat_std": round(iat_std, 6),
-            "iat_min": round(iat_min, 6),
-            "iat_max": round(iat_max, 6),
-            "iat_total": round(iat_total, 6),
-            "pkt_len_mean": round(pkt_len_mean, 4),
-            "pkt_len_std": round(pkt_len_std, 4),
-            "pkt_len_min": pkt_len_min,
-            "pkt_len_max": pkt_len_max,
-            "payload_len_mean": round(payload_len_mean, 4),
-            "payload_len_std": round(payload_len_std, 4),
-            "payload_len_min": payload_len_min,
-            "payload_len_max": payload_len_max,
-            "payload_ratio": round(payload_ratio, 4),
             "syn_count": self.syn_count,
             "ack_count": self.ack_count,
-            "fin_count": self.fin_count,
             "rst_count": self.rst_count,
-            "psh_count": self.psh_count,
-            "urg_count": self.urg_count,
-            "cwr_count": self.cwr_count,
-            "ece_count": self.ece_count,
-            "tcp_win_init": self.initial_window,
-            "tcp_win_mean": round(tcp_win_mean, 2),
-            "tcp_win_min": tcp_win_min,
-            "tcp_win_max": tcp_win_max,
-            "icmp_type": self.icmp_types[0] if self.icmp_types else -1,
-            "icmp_code": self.icmp_codes[0] if self.icmp_codes else -1,
-            "is_single_packet": 1 if self.packet_count == 1 else 0,
+            "protocol": proto_num,
         }
 
 
@@ -441,16 +426,12 @@ class PassiveFlowExtractor:
         if not records:
             logger.warning(f"No IP flows found in {self.pcap_path}. Writing empty CSV structure.")
             df = pd.DataFrame(columns=[
-                "flow_id", "src_ip", "dst_ip", "src_port", "dst_port", "protocol",
-                "start_time", "end_time", "flow_duration_sec", "packet_count",
-                "total_bytes", "total_payload_bytes", "bytes_per_sec", "pkts_per_sec",
-                "payload_bytes_per_sec", "iat_mean", "iat_std", "iat_min", "iat_max", "iat_total",
-                "pkt_len_mean", "pkt_len_std", "pkt_len_min", "pkt_len_max",
-                "payload_len_mean", "payload_len_std", "payload_len_min", "payload_len_max",
-                "payload_ratio", "syn_count", "ack_count", "fin_count", "rst_count",
-                "psh_count", "urg_count", "cwr_count", "ece_count", "tcp_win_init",
-                "tcp_win_mean", "tcp_win_min", "tcp_win_max", "icmp_type", "icmp_code",
-                "is_single_packet"
+                "flow_id", "src_ip", "dst_ip", "src_port", "dst_port",
+                "start_time", "end_time", "protocol_name",
+                "duration", "total_packets", "total_bytes", "packet_rate",
+                "byte_rate", "pkt_len_mean", "pkt_len_max", "pkt_len_std",
+                "iat_mean", "iat_std", "syn_count", "ack_count", "rst_count",
+                "protocol"
             ])
         else:
             df = pd.DataFrame(records)
@@ -487,26 +468,25 @@ def print_flow_summary(df: pd.DataFrame) -> None:
     print("                AEGIS SENTINEL NETWORK FLOW INGEST SUMMARY")
     print("=" * 70)
     print(f"Total Flows Extracted       : {len(df):,}")
-    print(f"Total Aggregated Packets    : {df['packet_count'].sum():,}")
+    print(f"Total Aggregated Packets    : {df['total_packets'].sum():,}")
     print(f"Total Bytes Ingested        : {df['total_bytes'].sum():,} bytes ({df['total_bytes'].sum() / (1024*1024):.2f} MB)")
-    print(f"Total Payload Bytes         : {df['total_payload_bytes'].sum():,} bytes")
     print(f"Unique Source IPs           : {df['src_ip'].nunique()}")
     print(f"Unique Destination IPs      : {df['dst_ip'].nunique()}")
     
     print("\n--- Protocol Breakdown ---")
-    proto_counts = df["protocol"].value_counts()
+    proto_counts = df["protocol_name"].value_counts()
     for proto, count in proto_counts.items():
         pct = (count / len(df)) * 100
         print(f"  - {proto:<10} : {count:>6} flows ({pct:5.1f}%)")
 
     print("\n--- Flow Duration & Rate Statistics ---")
-    print(f"  - Duration (sec)     : Mean = {df['flow_duration_sec'].mean():.4f}s, Max = {df['flow_duration_sec'].max():.4f}s")
-    print(f"  - Bytes/sec Rate     : Mean = {df['bytes_per_sec'].mean():.2f} B/s, Max = {df['bytes_per_sec'].max():.2f} B/s")
-    print(f"  - Inter-Arrival (s)  : Mean = {df['iat_mean'].mean():.6f}s, Max = {df['iat_max'].max():.6f}s")
+    print(f"  - Duration (sec)     : Mean = {df['duration'].mean():.4f}s, Max = {df['duration'].max():.4f}s")
+    print(f"  - Bytes/sec Rate     : Mean = {df['byte_rate'].mean():.2f} B/s, Max = {df['byte_rate'].max():.2f} B/s")
+    print(f"  - Inter-Arrival (s)  : Mean = {df['iat_mean'].mean():.6f}s")
     print(f"  - Packet Length (B)  : Mean = {df['pkt_len_mean'].mean():.2f} B, Max = {df['pkt_len_max'].max()} B")
     
     if "syn_count" in df.columns:
-        print(f"  - TCP Flags Observed : SYN={df['syn_count'].sum()}, ACK={df['ack_count'].sum()}, FIN={df['fin_count'].sum()}, RST={df['rst_count'].sum()}")
+        print(f"  - TCP Flags Observed : SYN={df['syn_count'].sum()}, ACK={df['ack_count'].sum()}, RST={df['rst_count'].sum()}")
 
     print("=" * 70 + "\n")
 

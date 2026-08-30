@@ -100,58 +100,48 @@ class TestPCAPIngest(unittest.TestCase):
         df = pd.DataFrame(records)
 
         # Find Forward TCP flow: 192.168.1.100:54321 -> 10.0.0.1:80
-        fwd_tcp = df[(df["src_ip"] == "192.168.1.100") & (df["dst_ip"] == "10.0.0.1") & (df["protocol"] == "TCP")]
+        fwd_tcp = df[(df["src_ip"] == "192.168.1.100") & (df["dst_ip"] == "10.0.0.1") & (df["protocol_name"] == "TCP")]
         self.assertEqual(len(fwd_tcp), 1)
         row = fwd_tcp.iloc[0]
 
         # Verify packet count and duration (101.5 - 100.0 = 1.5s)
-        self.assertEqual(row["packet_count"], 3)
-        self.assertAlmostEqual(row["flow_duration_sec"], 1.5, places=3)
+        self.assertEqual(row["total_packets"], 3)
+        self.assertAlmostEqual(row["duration"], 1.5, places=3)
         
         # Verify Inter-Arrival Times:
-        # Delays: [100.5 - 100.0 = 0.5, 101.5 - 100.5 = 1.0] -> Mean = 0.75s, Min = 0.5s, Max = 1.0s
+        # Delays: [100.5 - 100.0 = 0.5, 101.5 - 100.5 = 1.0] -> Mean = 0.75s
         self.assertAlmostEqual(row["iat_mean"], 0.75, places=4)
-        self.assertAlmostEqual(row["iat_min"], 0.5, places=4)
-        self.assertAlmostEqual(row["iat_max"], 1.0, places=4)
-        self.assertAlmostEqual(row["iat_total"], 1.5, places=4)
 
         # Verify Bytes and Rates
         self.assertGreater(row["total_bytes"], 0)
-        self.assertEqual(row["total_payload_bytes"], 100)
-        self.assertAlmostEqual(row["bytes_per_sec"], row["total_bytes"] / 1.5, places=2)
-        self.assertAlmostEqual(row["pkts_per_sec"], 3 / 1.5, places=2)
+        self.assertAlmostEqual(row["byte_rate"], row["total_bytes"] / 1.5, places=2)
+        self.assertAlmostEqual(row["packet_rate"], 3 / 1.5, places=2)
 
         # Verify TCP Flags
         self.assertEqual(row["syn_count"], 1)
         self.assertEqual(row["ack_count"], 2)  # p2 (PA) and p3 (FA)
-        self.assertEqual(row["fin_count"], 1)
-        self.assertEqual(row["psh_count"], 1)
         self.assertEqual(row["rst_count"], 0)
-        self.assertEqual(row["tcp_win_init"], 65535)
 
         # Verify Reverse TCP flow is separate
-        rev_tcp = df[(df["src_ip"] == "10.0.0.1") & (df["dst_ip"] == "192.168.1.100") & (df["protocol"] == "TCP")]
+        rev_tcp = df[(df["src_ip"] == "10.0.0.1") & (df["dst_ip"] == "192.168.1.100") & (df["protocol_name"] == "TCP")]
         self.assertEqual(len(rev_tcp), 1)
         rev_row = rev_tcp.iloc[0]
-        self.assertEqual(rev_row["packet_count"], 2)
-        self.assertAlmostEqual(rev_row["flow_duration_sec"], 0.9, places=3)  # 101.0 - 100.1
+        self.assertEqual(rev_row["total_packets"], 2)
+        self.assertAlmostEqual(rev_row["duration"], 0.9, places=3)  # 101.0 - 100.1
         self.assertEqual(rev_row["syn_count"], 1)
         self.assertEqual(rev_row["ack_count"], 2)
 
         # Verify UDP flow
-        udp_flow = df[df["protocol"] == "UDP"].iloc[0]
+        udp_flow = df[df["protocol_name"] == "UDP"].iloc[0]
         self.assertEqual(udp_flow["src_port"], 41234)
         self.assertEqual(udp_flow["dst_port"], 53)
-        self.assertEqual(udp_flow["packet_count"], 2)
+        self.assertEqual(udp_flow["total_packets"], 2)
         self.assertAlmostEqual(udp_flow["iat_mean"], 0.2, places=4)
 
         # Verify ICMP flow
-        icmp_flow = df[df["protocol"] == "ICMP"].iloc[0]
-        self.assertEqual(icmp_flow["packet_count"], 1)
-        self.assertEqual(icmp_flow["is_single_packet"], 1)
-        self.assertEqual(icmp_flow["flow_duration_sec"], 0.0)
-        self.assertEqual(icmp_flow["icmp_type"], 8)
-        self.assertEqual(icmp_flow["icmp_code"], 0)
+        icmp_flow = df[df["protocol_name"] == "ICMP"].iloc[0]
+        self.assertEqual(icmp_flow["total_packets"], 1)
+        self.assertEqual(icmp_flow["duration"], 0.0)
 
     def test_bidirectional_pairing_option(self):
         """Verify that enabling bidirectional mode merges forward and reverse packets into single flow."""
@@ -162,9 +152,9 @@ class TestPCAPIngest(unittest.TestCase):
 
         df = pd.DataFrame(records)
         # TCP forward (3 pkts) + reverse (2 pkts) should merge into 1 flow of 5 packets
-        tcp_flows = df[df["protocol"] == "TCP"]
+        tcp_flows = df[df["protocol_name"] == "TCP"]
         self.assertEqual(len(tcp_flows), 1)
-        self.assertEqual(tcp_flows.iloc[0]["packet_count"], 5)
+        self.assertEqual(tcp_flows.iloc[0]["total_packets"], 5)
 
     def test_csv_export_pipeline(self):
         """Test end-to-end export to CSV file."""
@@ -174,8 +164,8 @@ class TestPCAPIngest(unittest.TestCase):
         self.assertTrue(os.path.exists(self.csv_output))
         loaded_df = pd.read_csv(self.csv_output)
         self.assertEqual(len(loaded_df), 4)
-        self.assertIn("flow_duration_sec", loaded_df.columns)
-        self.assertIn("bytes_per_sec", loaded_df.columns)
+        self.assertIn("duration", loaded_df.columns)
+        self.assertIn("byte_rate", loaded_df.columns)
         self.assertIn("iat_mean", loaded_df.columns)
 
 
